@@ -23,7 +23,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Check that the sync token is present
+      # Doubles as a token check: this is a plain REST call, so it fails loudly
+      # and specifically if the secret is empty, malformed, expired, or scoped
+      # to the wrong repository.
+      - name: Resolve default branch and validate the token
+        id: repo
         env:
           GH_TOKEN: ${{ secrets.SYNC_FORK_TOKEN }}
         run: |
@@ -31,12 +35,20 @@ jobs:
             echo "::error::SYNC_FORK_TOKEN is not set. Create a fine-grained PAT with Contents: write and Workflows: write, then run: gh secret set SYNC_FORK_TOKEN"
             exit 1
           fi
+          if ! branch=$(gh api "repos/$GITHUB_REPOSITORY" --jq .default_branch); then
+            echo "::error::SYNC_FORK_TOKEN was rejected by the REST API. Check that the PAT has not expired and grants this repository Contents: write and Workflows: write."
+            exit 1
+          fi
+          echo "Default branch: $branch"
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
 
       # No checkout needed: `gh repo sync <owner/repo>` is a pure API call to
-      # POST /repos/{owner}/{repo}/merge-upstream. No --branch, so gh resolves
-      # the default branch itself. Never --force: a hard reset to upstream
+      # POST /repos/{owner}/{repo}/merge-upstream. --branch is passed
+      # explicitly so gh does not resolve the default branch over GraphQL,
+      # keeping the whole job on REST. Never --force: a hard reset to upstream
       # would delete this workflow.
       - name: Sync default branch from upstream
         env:
           GH_TOKEN: ${{ secrets.SYNC_FORK_TOKEN }}
-        run: gh repo sync "$GITHUB_REPOSITORY"
+          BRANCH: ${{ steps.repo.outputs.branch }}
+        run: gh repo sync "$GITHUB_REPOSITORY" --branch "$BRANCH"
