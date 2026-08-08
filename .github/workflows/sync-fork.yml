@@ -1,0 +1,42 @@
+# Fork-local workflow: keeps dantp-ai/reasoning-from-scratch in step with
+# rasbt/reasoning-from-scratch. Must stay on the default branch - GitHub only
+# runs scheduled workflows from there. Not intended to be contributed upstream.
+
+name: Sync fork with upstream
+
+on:
+  schedule:
+    # Daily at 05:37 UTC. Off the hour on purpose: on-the-hour crons are the
+    # most heavily delayed by GitHub's scheduler.
+    - cron: '37 5 * * *'
+  workflow_dispatch:
+
+# The job authenticates with SYNC_FORK_TOKEN, so GITHUB_TOKEN needs nothing.
+permissions: {}
+
+concurrency:
+  group: sync-fork
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check that the sync token is present
+        env:
+          GH_TOKEN: ${{ secrets.SYNC_FORK_TOKEN }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::error::SYNC_FORK_TOKEN is not set. Create a fine-grained PAT with Contents: write and Workflows: write, then run: gh secret set SYNC_FORK_TOKEN"
+            exit 1
+          fi
+
+      # No checkout needed: `gh repo sync <owner/repo>` is a pure API call to
+      # POST /repos/{owner}/{repo}/merge-upstream. No --branch, so gh resolves
+      # the default branch itself. Never --force: a hard reset to upstream
+      # would delete this workflow.
+      - name: Sync default branch from upstream
+        env:
+          GH_TOKEN: ${{ secrets.SYNC_FORK_TOKEN }}
+        run: gh repo sync "$GITHUB_REPOSITORY"
